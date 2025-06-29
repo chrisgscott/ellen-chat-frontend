@@ -1,21 +1,22 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { hasEnvVars } from "../utils";
+
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
 
-  // If the env vars are not set, skip middleware check. You can remove this once you setup the project.
-  if (!hasEnvVars) {
-    return supabaseResponse;
-  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: {
+        // IMPORTANT: Make sure to switch to your production domain in production
+        domain: process.env.NODE_ENV === 'production' ? '.your-domain.com' : 'localhost',
+        path: '/',
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -45,16 +46,17 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (
-    request.nextUrl.pathname !== "/" &&
-    !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
-    const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    return NextResponse.redirect(url);
+  // If user is not signed in and the current path is not an auth callback route,
+  // redirect the user to the centralized login page.
+  if (!user && !request.nextUrl.pathname.startsWith("/auth/callback")) {
+    const dashboardUrl = process.env.NEXT_PUBLIC_DASHBOARD_URL || 'http://localhost:3001';
+    const loginUrl = new URL(`${dashboardUrl}/auth/login`);
+
+    // To redirect back to the original URL after login, we can add a `redirect_to` query param.
+    // The dashboard's login page will need to handle this.
+    loginUrl.searchParams.set('redirect_to', request.nextUrl.href);
+
+    return NextResponse.redirect(loginUrl);
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
