@@ -14,13 +14,13 @@ interface ChatInterfaceProps {
 }
 
 interface Message {
-  from: 'user' | 'bot';
+  from: 'user' | 'assistant';
   text: string;
 }
 
 export function ChatInterface({ user, selectedSessionId, onNewChat }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([
-    { from: 'bot', text: 'Hello! How can I help you today?' },
+    { from: 'assistant', text: 'Hello! How can I help you today?' },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(selectedSessionId);
@@ -35,7 +35,7 @@ export function ChatInterface({ user, selectedSessionId, onNewChat }: ChatInterf
     if (selectedSessionId) {
       fetchMessages(selectedSessionId);
     } else {
-      setMessages([{ from: 'bot', text: 'Hello! How can I help you today?' }]);
+      setMessages([{ from: 'assistant', text: 'Hello! How can I help you today?' }]);
     }
   }, [selectedSessionId]);
 
@@ -93,24 +93,45 @@ export function ChatInterface({ user, selectedSessionId, onNewChat }: ChatInterf
       setSessionId(newSessionId);
     }
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let botMessage = '';
+    setMessages((prev) => [...prev, { from: 'assistant', text: '' }]);
 
-    setMessages((prev) => [...prev, { from: 'bot', text: '' }]);
+    const processStream = async () => {
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let botMessageText = '';
 
-    reader.read().then(function processText({ done, value }): any {
-      if (done) {
-        return;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const json = JSON.parse(line.substring(6));
+              if (json.token) {
+                botMessageText += json.token;
+                setMessages((prev) =>
+                  prev.map((msg, index) =>
+                    index === prev.length - 1
+                      ? { ...msg, text: botMessageText }
+                      : msg
+                  )
+                );
+              }
+            } catch (error) {
+              console.error('Failed to parse SSE data:', line, error);
+            }
+          }
+        }
       }
-      botMessage += decoder.decode(value, { stream: true });
-      setMessages((prev) =>
-        prev.map((msg, index) =>
-          index === prev.length - 1 ? { ...msg, text: botMessage } : msg
-        )
-      );
-      return reader.read().then(processText);
-    });
+    };
+
+    processStream();
   };
 
   return (
@@ -120,30 +141,37 @@ export function ChatInterface({ user, selectedSessionId, onNewChat }: ChatInterf
         <AuthButton user={user} />
       </header>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.map((msg, index) => (
-          <div
-            key={index}
-            className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+        {messages.map((msg, index) => {
+          // Debug logging for message rendering
+          if (index === messages.length - 1) {
+            console.log('Rendering message:', { from: msg.from, text: msg.text.substring(0, 100) + '...' });
+            console.log('Is assistant?', msg.from === 'assistant');
+          }
+          return (
             <div
-              className={`max-w-4xl p-3 rounded-lg ${
-                msg.from === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted'
-              }`}
+              key={index}
+              className={`flex ${msg.from === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              {msg.from === 'bot' ? (
-                <div className="prose dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.text}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                msg.text
-              )}
+              <div
+                className={`max-w-4xl p-3 rounded-lg ${
+                  msg.from === 'user'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted'
+                }`}
+              >
+                {msg.from === 'assistant' ? (
+                  <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.text}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap">{msg.text}</div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
       <div className="p-4 border-t bg-background">

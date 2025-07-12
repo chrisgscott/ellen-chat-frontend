@@ -18,20 +18,38 @@ export function ChatHistorySidebar({ onSelectSession, onNewChat }: ChatHistorySi
 
   useEffect(() => {
     const fetchSessions = async () => {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
+      try {
+        const supabase = createClient();
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-      if (!session) return;
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          return;
+        }
 
-      const response = await fetch('http://localhost:8000/sessions', {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      });
+        if (!session) {
+          console.log('No active session found');
+          return;
+        }
 
-      if (response.ok) {
-        const data = await response.json();
-        setSessions(data);
+        console.log('Making request to fetch sessions with user:', session.user?.id);
+        const response = await fetch('http://localhost:8000/sessions', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Sessions fetched:', data);
+          setSessions(data);
+        } else {
+          console.error('Failed to fetch sessions:', response.status, response.statusText);
+          const errorText = await response.text();
+          console.error('Error response:', errorText);
+        }
+      } catch (error) {
+        console.error('Error fetching sessions:', error);
       }
     };
 
